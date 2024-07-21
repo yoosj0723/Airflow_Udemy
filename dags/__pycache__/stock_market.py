@@ -3,10 +3,13 @@ from airflow.hooks.base import BaseHook #API를 가져오기위한 메소드클�
 from airflow.sensors.base import PokeReturnValue
 from airflow.operators.python import PythonOperator
 from airflow.providers.docker.operators.docker import DockerOperator
+from astro import sql as aql
+from astro.files import File
+from astro.sql.table import Table, Metadata
 from datetime import datetime
 import requests
 
-from include.stock_market.tasks import _get_stock_prices, _store_prices, _get_formatted_csv
+from include.stock_market.tasks import _get_stock_prices, _store_prices, _get_formatted_csv, BUCKET_NAME
 
 SYMBOL = 'AAPL'
 
@@ -62,6 +65,18 @@ def stock_market():                     #데이터 파이프라인의 Dag ID: �
         }
     )
 
-    is_api_available() >> get_stock_prices >> store_prices >> format_prices >> get_formatted_csv   #종속성 정의
+    load_to_dw = aql.load_file(
+        task_id='load_to_dw',
+        input_file=File(path=f"s3://{BUCKET_NAME}/{{ task_instance.xcom_pull(task_ids='store_prices') }}", conn_id='minio'),
+        output_table=Table(
+            name='stock_market',
+            conn_id='postgres',
+            metadata=Metadata(
+                schema='public'
+            )
+        )
+    )
+
+    is_api_available() >> get_stock_prices >> store_prices >> format_prices >> get_formatted_csv >> load_to_dw   #종속성 정의
 stock_market()
 #이러고 Airflow UI 확인
